@@ -59,7 +59,8 @@ class DepthResult:
 class DepthAppState:
     def __init__(self) -> None:
         self.original_bgr: Optional[np.ndarray] = None
-        self.depth_raw: Optional[np.ndarray] = None
+        self.depth_raw: Optional[np.ndarray] = None  # Luu tru Z thuc te (da nghich dao)
+        self.disparity_raw: Optional[np.ndarray] = None # Luu tru disparity goc tu MiDaS
         self.side_by_side: Optional[np.ndarray] = None
         self.original_width: int = 0
         self.original_height: int = 0
@@ -179,19 +180,22 @@ def estimate_depth(
         align_corners=False,
     ).squeeze()
 
-    depth_raw = prediction.cpu().numpy().astype(np.float32)
+    # MiDaS tra ve Disparity (Nghich dao cua do sau). Gia tri cang lon tuc la cang gan.
+    disparity_raw = prediction.cpu().numpy().astype(np.float32)
 
-    # Mo hinh MiDaS thuong cho ra gia tri do sau tuong doi: gia tri lon hon
-    # khong nhat thiet la xa hon theo nghia vat ly tuyet doi, nhung co the dung
-    # de quan sat do gan/xa trong cung mot anh.
-    depth_min = float(np.min(depth_raw))
-    depth_max = float(np.max(depth_raw))
+    # De tinh Do sau Z (Depth) thuc te (cang xa gia tri cang lon), ta lay nghich dao:
+    # Z = 1 / disparity (Cong them 1e-6 de tranh chia cho 0)
+    depth_raw = 1.0 / (disparity_raw + 1e-6)
 
-    if depth_max - depth_min < 1e-8:
-        depth_uint8 = np.zeros_like(depth_raw, dtype=np.uint8)
+    # Chuan hoa DISPARITY de ve anh (Theo quy uoc CV: Gan = Sang/Vang, Xa = Toi/Tim)
+    disp_min = float(np.min(disparity_raw))
+    disp_max = float(np.max(disparity_raw))
+
+    if disp_max - disp_min < 1e-8:
+        depth_uint8 = np.zeros_like(disparity_raw, dtype=np.uint8)
     else:
-        depth_norm = (depth_raw - depth_min) / (depth_max - depth_min)
-        depth_uint8 = (depth_norm * 255.0).clip(0, 255).astype(np.uint8)
+        disp_norm = (disparity_raw - disp_min) / (disp_max - disp_min)
+        depth_uint8 = (disp_norm * 255.0).clip(0, 255).astype(np.uint8)
 
     depth_color = cv2.applyColorMap(depth_uint8, cv2.COLORMAP_INFERNO)
 
@@ -222,7 +226,7 @@ def on_mouse(event: int, x: int, y: int, flags: int, state: DepthAppState) -> No
         if iy >= state.depth_raw.shape[0] or ix >= state.depth_raw.shape[1]:
             return
         z_value = float(state.depth_raw[iy, ix])
-        print(f"Click ({ix}, {iy}) -> depth Z tuong doi = {z_value:.6f}")
+        print(f"Click ({ix}, {iy}) -> Do sau Z (tuong doi) = {z_value:.6f}")
     else:
         # Nua ben phai la depth map. Tru toa do ve khung anh goc.
         ix = x - state.original_width
@@ -230,7 +234,7 @@ def on_mouse(event: int, x: int, y: int, flags: int, state: DepthAppState) -> No
         if iy >= state.depth_raw.shape[0] or ix >= state.depth_raw.shape[1]:
             return
         z_value = float(state.depth_raw[iy, ix])
-        print(f"Click depth-map ({ix}, {iy}) -> depth Z tuong doi = {z_value:.6f}")
+        print(f"Click depth-map ({ix}, {iy}) -> Do sau Z (tuong doi) = {z_value:.6f}")
 
 
 def run_app(image_path: str, model_type: str = "MiDaS_small") -> None:
